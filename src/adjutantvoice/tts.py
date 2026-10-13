@@ -37,6 +37,20 @@ _inference_lock = threading.Lock()
 # Lifecycle
 # ---------------------------------------------------------------------------
 
+class _CPUUnpickler(pickle.Unpickler):
+    """Unpickler that maps tensor storages to CPU.
+
+    Voice-clone pickles created on a CUDA machine embed CUDA storages, which
+    fail to load on CPU / XPU / MPS hosts. OmniVoice moves the prompt tokens
+    to the model's device during generation, so CPU is always safe here.
+    """
+
+    def find_class(self, module, name):
+        if module == "torch.storage" and name == "_load_from_bytes":
+            return lambda b: torch.load(io.BytesIO(b), map_location="cpu", weights_only=False)
+        return super().find_class(module, name)
+
+
 def load(
     voice_clone_path: Optional[Path] = None,
 ) -> None:
@@ -74,7 +88,7 @@ def load(
     if clone_path.exists():
         logger.info("Loading voice clone from %s …", clone_path)
         with open(clone_path, "rb") as fh:
-            _voice_clone_prompt = pickle.load(fh)
+            _voice_clone_prompt = _CPUUnpickler(fh).load()
     else:
         logger.info(
             "No voice clone found at %s — falling back to the default '%s' "
