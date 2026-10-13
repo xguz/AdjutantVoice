@@ -19,7 +19,8 @@ ASSETS_DIR = _PACKAGE_DIR / "assets"
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="AV_",        # e.g. AV_HOST=0.0.0.0
-        env_file=".env",
+        # User-wide config first, then a local .env (later files win).
+        env_file=(Path.home() / ".adjutantvoice" / ".env", ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )

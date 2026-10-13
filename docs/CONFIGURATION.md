@@ -6,7 +6,8 @@ All settings are defined in `src/adjutantvoice/config.py` as a single
 (`from adjutantvoice.config import settings`).
 
 Every field can be overridden with an environment variable prefixed
-`AV_`, or by placing values in a `.env` file in the working directory.
+`AV_`, or by placing values in a `.env` file — either the user-wide
+`~/.adjutantvoice/.env` or one in the working directory.
 Unrecognized `AV_*` variables are silently ignored rather than raising an
 error (`extra="ignore"`).
 
@@ -14,7 +15,8 @@ error (`extra="ignore"`).
 
 1. Environment variable (`AV_<FIELD_NAME>`, upper snake case)
 2. `.env` file in the current working directory
-3. Default value below
+3. `~/.adjutantvoice/.env`
+4. Default value below
 
 ## Settings
 
