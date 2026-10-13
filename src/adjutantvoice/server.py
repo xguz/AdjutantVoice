@@ -27,21 +27,21 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from adjutantvoice import tts
+from adjutantvoice import engine
 from adjutantvoice.config import settings
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Lifespan — delegate model loading/unloading to tts module
+# Lifespan — delegate model loading/unloading to the engine
 # ---------------------------------------------------------------------------
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    tts.load()
+    engine.load()
     yield
-    tts.unload()
+    engine.unload()
 
 
 app = FastAPI(title="AdjutantVoice TTS Server", lifespan=lifespan)
@@ -96,8 +96,8 @@ def synthesize(req: SynthesizeRequest):
 def health():
     return {
         "status": "ok",
-        "model_loaded": tts.is_loaded(),
-        "voice_mode": "clone" if tts.using_voice_clone() else "default",
+        "model_loaded": engine.is_loaded(),
+        "voice_mode": "clone" if engine.using_voice_clone() else "default",
     }
 
 
@@ -106,10 +106,10 @@ def health():
 # ---------------------------------------------------------------------------
 
 def _synthesis_response(text: str) -> StreamingResponse:
-    if not tts.is_loaded():
+    if not engine.is_loaded():
         raise HTTPException(status_code=503, detail="Model not loaded yet")
     try:
-        buf = tts.synthesize_to_buffer(text)
+        buf = engine.synthesize_to_buffer(text)
     except ValueError as exc:
         # ValueError here is always our own deliberate, user-facing
         # validation message (e.g. "text must not be empty") — safe to

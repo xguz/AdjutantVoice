@@ -29,7 +29,7 @@ from pathlib import Path
 
 from fastmcp import FastMCP, Context
 
-from adjutantvoice import tts
+from adjutantvoice import engine
 from adjutantvoice.config import settings
 
 
@@ -40,11 +40,11 @@ from adjutantvoice.config import settings
 @asynccontextmanager
 async def _lifespan(server: FastMCP):
     settings.tts_output_dir.mkdir(parents=True, exist_ok=True)
-    tts.load()
+    engine.load()
     try:
         yield
     finally:
-        tts.unload()
+        engine.unload()
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +89,7 @@ def tts_file(text_file_path: str, ctx: Context) -> str:
         raise FileNotFoundError(f"Text file not found: {src}")
 
     text = src.read_text(encoding="utf-8")
-    mp3_bytes = tts.synthesize(text)
+    mp3_bytes = engine.synthesize(text)
 
     out_path = settings.tts_output_dir / f"{uuid.uuid4().hex}.mp3"
     out_path.write_bytes(mp3_bytes)
@@ -113,7 +113,7 @@ def tts_stream(text: str, ctx: Context) -> bytes:
     Returns:
         Raw MP3 audio data as bytes.
     """
-    return tts.synthesize(text)
+    return engine.synthesize(text)
 
 
 @mcp.tool(
@@ -141,7 +141,7 @@ def tts_speak(text: str, ctx: Context) -> str:
     Raises:
         RuntimeError: If ``ffplay`` is not found on the server's PATH.
     """
-    mp3_bytes, duration_s = tts.synthesize_with_duration(text)
+    mp3_bytes, duration_s = engine.synthesize_with_duration(text)
 
     with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
         tmp_path = Path(tmp.name)

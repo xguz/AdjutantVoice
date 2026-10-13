@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     device: str = "cuda:0"
     dtype: str = "float16"              # "float16" | "bfloat16" | "float32"
     num_step: int = 32                  # OmniVoice decoding steps; lower = faster, rougher
+    idle_unload_seconds: int = 0        # free model weights after this long unused; 0 = never
 
     # Voice
     #

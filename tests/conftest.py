@@ -77,11 +77,26 @@ def reset_tts_state():
     without this fixture one test's `tts.load()` would leave the model
     "loaded" for every test that runs after it.
     """
-    from adjutantvoice import tts
+    from adjutantvoice import engine, tts
 
+    engine.unload()
     tts.unload()
     yield
+    engine.unload()
     tts.unload()
+
+
+@pytest.fixture(autouse=True)
+def in_process_engine(monkeypatch):
+    """Keep `engine` in in-process mode, whatever ~/.adjutantvoice/.env says.
+
+    Worker mode spawns a real Python process that would import the real
+    torch / omnivoice instead of the stubs above; it's covered by
+    `test_engine.py` with a fake worker.
+    """
+    from adjutantvoice.config import settings
+
+    monkeypatch.setattr(settings, "idle_unload_seconds", 0)
 
 
 @pytest.fixture
