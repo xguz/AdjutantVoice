@@ -26,6 +26,7 @@ error (`extra="ignore"`).
 | `model_id` | `AV_MODEL_ID` | `k2-fsa/OmniVoice` | HuggingFace-style model identifier passed to `OmniVoice.from_pretrained()`. |
 | `device` | `AV_DEVICE` | `cuda:0` | Torch device string for model placement. |
 | `dtype` | `AV_DTYPE` | `float16` | One of `float16`, `bfloat16`, `float32`. Unrecognized values silently fall back to `float16` (see `tts.py` / `voice.py`). |
+| `num_step` | `AV_NUM_STEP` | `32` | OmniVoice iterative decoding steps per generation. Lower is proportionally faster with somewhat rougher audio (16 ≈ 2× faster). |
 | `voice_clone_dir` | `AV_VOICE_CLONE_DIR` | `~/.adjutantvoice/voices` | Directory where user-generated clone `.pkl` files live. |
 | `default_voice_clone_name` | `AV_DEFAULT_VOICE_CLONE_NAME` | `default` | Base filename (without `.pkl`) for the clone `tts.load()` looks for automatically. |
 | `bundled_voice_clone_path` | `AV_BUNDLED_VOICE_CLONE_PATH` | `<package>/assets/models/default.pkl` | Voice-clone pickle shipped in the repo/package. Used when no clone exists at `voice_clone_path`, so a fresh install works out of the box without running `av voice create-clone`. |

@@ -138,6 +138,13 @@ def get_model() -> OmniVoice:
 # Synthesis
 # ---------------------------------------------------------------------------
 
+def _generate(text: str):
+    with _inference_lock:
+        if _voice_clone_prompt is not None:
+            return _model.generate(text=text, voice_clone_prompt=_voice_clone_prompt, num_step=settings.num_step)
+        return _model.generate(text=text, instruct=settings.default_voice_instruct, num_step=settings.num_step)
+
+
 def synthesize(text: str) -> bytes:
     """Synthesize *text* and return raw MP3 bytes.
 
@@ -158,11 +165,7 @@ def synthesize(text: str) -> bytes:
     if not text:
         raise ValueError("text must not be empty")
 
-    with _inference_lock:
-        if _voice_clone_prompt is not None:
-            audio = _model.generate(text=text, voice_clone_prompt=_voice_clone_prompt)
-        else:
-            audio = _model.generate(text=text, instruct=settings.default_voice_instruct)
+    audio = _generate(text)
 
     buf = io.BytesIO()
     sf.write(buf, audio[0], settings.sample_rate, format="MP3")
@@ -200,11 +203,7 @@ def synthesize_with_duration(text: str) -> tuple[bytes, float]:
     if not text:
         raise ValueError("text must not be empty")
 
-    with _inference_lock:
-        if _voice_clone_prompt is not None:
-            audio = _model.generate(text=text, voice_clone_prompt=_voice_clone_prompt)
-        else:
-            audio = _model.generate(text=text, instruct=settings.default_voice_instruct)
+    audio = _generate(text)
 
     samples = audio[0]
     duration_s = round(len(samples) / settings.sample_rate, 1)

@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     model_id: str = "k2-fsa/OmniVoice"
     device: str = "cuda:0"
     dtype: str = "float16"              # "float16" | "bfloat16" | "float32"
+    num_step: int = 32                  # OmniVoice decoding steps; lower = faster, rougher
 
     # Voice
     #
