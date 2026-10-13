@@ -152,6 +152,8 @@ def tts_speak(text: str, ctx: Context) -> str:
             ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", str(tmp_path)],
             check=True,
             capture_output=True,
+            # Windows: don't flash a console window when the server runs windowless.
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         return f"Played {duration_s} s of audio."
     except FileNotFoundError:
