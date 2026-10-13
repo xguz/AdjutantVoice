@@ -135,6 +135,27 @@ def test_load_maps_cuda_tensor_storages_to_cpu(monkeypatch, fake_omnivoice_cls, 
     assert calls == [(b"payload", {"map_location": "cpu", "weights_only": False})]
 
 
+def test_load_on_xpu_patches_token_scoring(monkeypatch, fake_omnivoice_cls, fake_model, tmp_settings):
+    monkeypatch.setattr(tts, "OmniVoice", fake_omnivoice_cls)
+    monkeypatch.setattr(tmp_settings, "device", "xpu")
+
+    tts.load()
+
+    patched = fake_model._predict_tokens_with_scoring
+    assert patched.__func__ is tts._xpu_predict_tokens_with_scoring
+    assert patched.__self__ is fake_model
+
+
+def test_load_on_cuda_leaves_token_scoring_alone(monkeypatch, fake_omnivoice_cls, fake_model, tmp_settings):
+    monkeypatch.setattr(tts, "OmniVoice", fake_omnivoice_cls)
+    monkeypatch.setattr(tmp_settings, "device", "cuda:0")
+    original = fake_model._predict_tokens_with_scoring
+
+    tts.load()
+
+    assert fake_model._predict_tokens_with_scoring is original
+
+
 # ---------------------------------------------------------------------------
 # Synthesis
 # ---------------------------------------------------------------------------
