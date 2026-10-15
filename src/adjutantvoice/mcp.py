@@ -21,7 +21,9 @@ or overridden with --port.
 
 from __future__ import annotations
 
+import asyncio
 import subprocess
+import sys
 import tempfile
 import uuid
 from contextlib import asynccontextmanager
@@ -185,7 +187,20 @@ def start(transport: str = "streamable-http", port: int = settings.mcp_port):
     if transport == "stdio":
         mcp.run()
     else:
+        use_selector_loop_on_windows()
         mcp.run(transport=transport, port=port)
+
+
+def use_selector_loop_on_windows() -> None:
+    """Serve HTTP on asyncio's selector event loop on Windows.
+
+    The default Proactor loop closes the listening socket for good when an
+    accept fails with any OSError — e.g. WinError 64 when a client vanishes
+    mid-connection around sleep/resume — so the process keeps running but
+    refuses every new connection. The selector loop skips such connections.
+    """
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
 if __name__ == "__main__":

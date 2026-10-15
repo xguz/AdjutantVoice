@@ -85,3 +85,29 @@ def test_tts_speak_raises_runtime_error_if_ffplay_missing(monkeypatch):
 
     with pytest.raises(RuntimeError, match="ffplay"):
         mcp_module.tts_speak("hello there", ctx=None)
+
+
+# ---------------------------------------------------------------------------
+# start
+# ---------------------------------------------------------------------------
+
+def test_start_http_uses_selector_loop_on_windows(monkeypatch):
+    calls = []
+    monkeypatch.setattr(mcp_module.sys, "platform", "win32")
+    monkeypatch.setattr(mcp_module.asyncio, "set_event_loop_policy", lambda p: calls.append(type(p).__name__))
+    monkeypatch.setattr(mcp_module.asyncio, "WindowsSelectorEventLoopPolicy", type("WindowsSelectorEventLoopPolicy", (), {}), raising=False)
+    monkeypatch.setattr(mcp_module.mcp, "run", lambda **kw: calls.append(kw))
+
+    mcp_module.start(transport="streamable-http", port=1234)
+
+    assert calls == ["WindowsSelectorEventLoopPolicy", {"transport": "streamable-http", "port": 1234}]
+
+
+def test_start_stdio_leaves_event_loop_alone(monkeypatch):
+    calls = []
+    monkeypatch.setattr(mcp_module.asyncio, "set_event_loop_policy", lambda p: calls.append("policy"))
+    monkeypatch.setattr(mcp_module.mcp, "run", lambda **kw: calls.append(kw))
+
+    mcp_module.start(transport="stdio")
+
+    assert calls == [{}]

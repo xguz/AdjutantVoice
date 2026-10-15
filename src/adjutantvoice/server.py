@@ -20,6 +20,7 @@ Run directly:
 """
 
 import logging
+import sys
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -135,6 +136,9 @@ def start(host: str = settings.host, port: int = settings.port, reload: bool = F
         host=host,
         port=port,
         reload=reload,
+        # uvicorn picks the Proactor loop on Windows, which stops accepting
+        # connections after a failed accept (see mcp.use_selector_loop_on_windows).
+        loop="asyncio:SelectorEventLoop" if sys.platform == "win32" else "auto",
     )
 
 
