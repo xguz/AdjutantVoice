@@ -7,7 +7,8 @@ using_voice_clone / synthesize*), in one of two modes chosen by
 
 * ``0`` (default) — in-process: every call goes straight to :mod:`tts`.
 * ``> 0`` — worker: the model lives in a child process (:mod:`worker`) that
-  is stopped after that many idle seconds and respawned on the next request.
+  is started by the first request, stopped after that many idle seconds and
+  respawned on the next request.
   Ending the process is the only way to hand everything back to the OS —
   model weights, the torch runtime and compiled GPU kernels (~4 GB on an
   Intel iGPU even after the weights are freed in-process).
@@ -21,6 +22,7 @@ from __future__ import annotations
 import io
 import logging
 import multiprocessing
+import sys
 import threading
 import time
 from pathlib import Path
@@ -147,17 +149,22 @@ def _call(name: str, *args):
 
 def load(voice_clone_path: Optional[Path] = None) -> None:
     """Load the model — in a worker process if idle unloading is enabled."""
-    global _started, _voice_clone_path
+    global _started, _voice_clone_path, _using_clone
     if not _use_worker():
         _tts().load(voice_clone_path)
         return
     with _lock:
         if _started:
             return
+        # The worker is spawned by the first request, not here: servers start
+        # listening within seconds instead of after a ~30 s model load, and no
+        # memory is used until speech is actually needed.
         _voice_clone_path = voice_clone_path
-        _spawn()  # load eagerly so the first request after startup is fast
+        # Same lookup as tts.load(); replaced by the worker's answer once it runs.
+        _using_clone = (voice_clone_path or settings.voice_clone_path).exists() or (
+            settings.bundled_voice_clone_path.exists()
+        )
         _started = True
-        _touch()
 
 
 def unload() -> None:
@@ -169,7 +176,10 @@ def unload() -> None:
             _idle_timer = None
         _stop()
         _started = False
-    _tts().unload()
+    # Only touch tts if this process loaded it (in-process mode); importing it
+    # here would pull torch into a worker-mode server just to shut down.
+    if "adjutantvoice.tts" in sys.modules:
+        _tts().unload()
 
 
 def is_loaded() -> bool:

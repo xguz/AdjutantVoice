@@ -37,12 +37,13 @@ def worker_mode(monkeypatch):
     return settings
 
 
-def test_load_starts_worker_and_synthesizes(worker_mode):
+def test_worker_starts_on_first_request(worker_mode):
     engine.load()
 
     assert engine.is_loaded() is True
-    assert engine._proc.is_alive()
+    assert engine._proc is None  # load() doesn't spawn the worker
     assert engine.synthesize("hello") == b"MP3:hello"
+    assert engine._proc.is_alive()
     assert engine.synthesize_with_duration("hello") == (b"MP3", 1.5)
     assert engine.synthesize_to_buffer("hi").read() == b"MP3:hi"
 
@@ -60,15 +61,30 @@ def test_worker_errors_are_reraised(worker_mode):
     assert engine.synthesize("still works") == b"MP3:still works"
 
 
-def test_voice_clone_path_is_passed_to_worker(worker_mode, tmp_path):
-    engine.load(voice_clone_path=tmp_path / "clone.pkl")
+def test_using_voice_clone_is_known_before_worker_starts(worker_mode, tmp_settings):
+    clone_path = tmp_settings.voice_clone_path
+    clone_path.parent.mkdir(parents=True, exist_ok=True)
+    clone_path.write_bytes(b"clone")
 
+    engine.load()
+
+    assert engine._proc is None
     assert engine.using_voice_clone() is True
+
+
+def test_voice_clone_path_is_passed_to_worker(worker_mode, tmp_settings, tmp_path):
+    engine.load(voice_clone_path=tmp_path / "clone.pkl")  # file doesn't exist
+    assert engine.using_voice_clone() is False
+
+    engine.synthesize("hello")
+
+    assert engine.using_voice_clone() is True  # the fake worker reports the path it got
 
 
 def test_idle_worker_is_stopped_and_respawned(worker_mode):
     worker_mode.idle_unload_seconds = 1
     engine.load()
+    engine.synthesize("first")
     proc = engine._proc
 
     time.sleep(2)
@@ -82,6 +98,7 @@ def test_idle_worker_is_stopped_and_respawned(worker_mode):
 
 def test_unload_stops_worker(worker_mode):
     engine.load()
+    engine.synthesize("hello")
     proc = engine._proc
 
     engine.unload()
