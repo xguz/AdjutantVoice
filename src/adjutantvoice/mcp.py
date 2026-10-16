@@ -25,6 +25,8 @@ import asyncio
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -143,13 +145,20 @@ def tts_speak(text: str, ctx: Context) -> str:
     Raises:
         RuntimeError: If ``ffplay`` is not found on the server's PATH.
     """
-    mp3_bytes, duration_s = engine.synthesize_with_duration(text)
-
-    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
-        tmp_path = Path(tmp.name)
-        tmp_path.write_bytes(mp3_bytes)
-
+    # Take a place in line on arrival, so clips play in the order they were
+    # requested; synthesis still overlaps with an earlier clip's playback.
+    ticket = _playback.take_ticket()
+    played = False
+    tmp_path = None
     try:
+        mp3_bytes, duration_s = engine.synthesize_with_duration(text)
+
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+            tmp_path.write_bytes(mp3_bytes)
+
+        _playback.wait_turn(ticket)
+        played = True
         subprocess.run(
             ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", str(tmp_path)],
             check=True,
@@ -164,7 +173,53 @@ def tts_speak(text: str, ctx: Context) -> str:
             "(`sudo apt install ffmpeg` or `brew install ffmpeg`)."
         ) from None
     finally:
-        tmp_path.unlink(missing_ok=True)
+        _playback.finish(ticket, played)
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+
+
+class _PlaybackQueue:
+    """Plays one clip at a time, first come first served, with a pause between
+    back-to-back clips (``settings.speak_gap_seconds``).
+
+    tts_speak calls run concurrently in FastMCP's thread pool; without this,
+    two calls (e.g. from two Claude sessions) would talk over each other.
+    """
+
+    def __init__(self):
+        self._cond = threading.Condition()
+        self._next_ticket = 0
+        self._serving = 0
+        self._finished: set[int] = set()
+        self._last_end = float("-inf")
+
+    def take_ticket(self) -> int:
+        with self._cond:
+            ticket = self._next_ticket
+            self._next_ticket += 1
+            return ticket
+
+    def wait_turn(self, ticket: int) -> None:
+        """Block until every earlier ticket is finished and the gap has passed."""
+        with self._cond:
+            self._cond.wait_for(lambda: self._serving == ticket)
+            delay = self._last_end + settings.speak_gap_seconds - time.monotonic()
+        if delay > 0:
+            time.sleep(delay)
+
+    def finish(self, ticket: int, played: bool) -> None:
+        """Release *ticket*; also called for tickets that never played (e.g. synthesis failed)."""
+        with self._cond:
+            if played:
+                self._last_end = time.monotonic()
+            self._finished.add(ticket)
+            while self._serving in self._finished:
+                self._finished.remove(self._serving)
+                self._serving += 1
+            self._cond.notify_all()
+
+
+_playback = _PlaybackQueue()
 
 
 # ---------------------------------------------------------------------------

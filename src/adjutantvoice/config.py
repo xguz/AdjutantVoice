@@ -61,6 +61,7 @@ class Settings(BaseSettings):
 
     # MCP output
     tts_output_dir: Path = Path("tts_output")
+    speak_gap_seconds: float = 2.0      # pause between back-to-back tts_speak clips
 
     # CLI request timeouts (seconds), overrideable via
     # AV_CLI_SPEAK_TIMEOUT / AV_CLI_SPEAK_FILE_TIMEOUT for slower

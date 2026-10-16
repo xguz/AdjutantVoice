@@ -111,3 +111,83 @@ def test_start_stdio_leaves_event_loop_alone(monkeypatch):
     mcp_module.start(transport="stdio")
 
     assert calls == [{}]
+
+
+# ---------------------------------------------------------------------------
+# tts_speak playback queue
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def playback(monkeypatch, tmp_settings):
+    """Fresh queue, short gap, and a fake ffplay that records when each clip played."""
+    import threading
+    import time
+
+    monkeypatch.setattr(mcp_module, "_playback", mcp_module._PlaybackQueue())
+    monkeypatch.setattr(tmp_settings, "speak_gap_seconds", 0.3)
+    played = []
+    lock = threading.Lock()
+
+    def fake_synth(text):
+        if text == "boom":
+            raise RuntimeError("synthesis failed")
+        if text == "slow to synthesize":
+            time.sleep(0.4)
+        return text.encode(), 1.0
+
+    def fake_ffplay(cmd, **kwargs):
+        start = time.monotonic()
+        time.sleep(0.2)
+        with lock:
+            played.append((open(cmd[-1], "rb").read().decode(), start, time.monotonic()))
+
+    monkeypatch.setattr(tts, "synthesize_with_duration", fake_synth)
+    monkeypatch.setattr(mcp_module.subprocess, "run", fake_ffplay)
+    return played
+
+
+def _speak_concurrently(*texts):
+    import threading
+    import time
+
+    threads = []
+    for text in texts:
+        t = threading.Thread(target=lambda s=text: _ignore_errors(mcp_module.tts_speak, s, ctx=None))
+        t.start()
+        threads.append(t)
+        time.sleep(0.05)  # fixes the arrival order
+    for t in threads:
+        t.join(10)
+
+
+def _ignore_errors(fn, *args, **kwargs):
+    try:
+        fn(*args, **kwargs)
+    except RuntimeError:
+        pass
+
+
+def test_tts_speak_plays_one_at_a_time_in_arrival_order_with_a_gap(playback):
+    # The first caller is slower to synthesize, but it arrived first, so it plays first.
+    _speak_concurrently("slow to synthesize", "second", "third")
+
+    assert [text for text, _, _ in playback] == ["slow to synthesize", "second", "third"]
+    for (_, _, prev_end), (_, next_start, _) in zip(playback, playback[1:]):
+        assert next_start - prev_end >= 0.3 - 0.02  # no overlap, gap respected
+
+
+def test_tts_speak_failure_does_not_block_the_queue(playback):
+    _speak_concurrently("first", "boom", "third")
+
+    assert [text for text, _, _ in playback] == ["first", "third"]
+
+
+def test_tts_speak_no_gap_when_nothing_played_recently(playback):
+    import time
+
+    mcp_module.tts_speak("hello", ctx=None)
+    time.sleep(0.4)  # longer than the gap
+    t = time.monotonic()
+    mcp_module.tts_speak("later", ctx=None)
+
+    assert playback[1][1] - t < 0.1  # played right away

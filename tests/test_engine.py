@@ -153,3 +153,29 @@ def test_worker_not_started_when_memory_is_low(worker_mode, monkeypatch):
     assert engine._proc is None
     monkeypatch.setattr(engine, "_available_memory_gb", lambda: 8.0)
     assert engine.synthesize("hello") == b"MP3:hello"
+
+
+def test_request_whose_budget_ran_out_waiting_fails_without_starting_a_worker(worker_mode, monkeypatch):
+    engine.load()
+    worker_mode.worker_timeout_seconds = 1
+    spawned = []
+    monkeypatch.setattr(engine, "_spawn", lambda deadline=None: spawned.append(deadline))
+
+    with engine._lock:  # an earlier request holds the engine...
+        import threading
+
+        result = []
+        t = threading.Thread(target=lambda: result.append(_capture(engine.synthesize, "queued")))
+        t.start()
+        time.sleep(1.5)  # ...for longer than this request's whole budget
+    t.join(5)
+
+    assert "longer than 1s" in str(result[0])
+    assert spawned == []
+
+
+def _capture(fn, *args):
+    try:
+        return fn(*args)
+    except Exception as exc:
+        return exc

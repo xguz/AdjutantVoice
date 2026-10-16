@@ -175,9 +175,17 @@ def _call(name: str, *args):
     # One budget for the whole request, including a worker (re)start, so a
     # stuck worker fails well before MCP clients give up on the call.
     deadline = time.monotonic() + timeout if timeout > 0 else None
+    too_slow = RuntimeError(
+        f"TTS request took longer than {timeout}s (AV_WORKER_TIMEOUT_SECONDS); the worker "
+        "was stopped and will restart on the next request. The machine may be low on memory."
+    )
     with _lock:
         if not _started:
             raise RuntimeError("TTS model is not loaded. Call engine.load() first.")
+        if deadline is not None and time.monotonic() >= deadline:
+            # The whole budget went on waiting for an earlier request; don't
+            # start a worker there's no time left to use.
+            raise too_slow
         if _conn is None:
             _spawn(deadline)
         try:
@@ -185,10 +193,7 @@ def _call(name: str, *args):
             status, result = _recv(_conn, deadline)
         except TimeoutError:
             _kill()
-            raise RuntimeError(
-                f"TTS request took longer than {timeout}s (AV_WORKER_TIMEOUT_SECONDS); the worker "
-                "was stopped and will restart on the next request. The machine may be low on memory."
-            ) from None
+            raise too_slow from None
         except (EOFError, OSError):
             _stop()
             raise RuntimeError("TTS worker process died; it will be restarted on the next request.") from None
