@@ -22,17 +22,27 @@ def fake_worker(conn, voice_clone_path=None):
         name, (text,) = msg
         if not text.strip():
             conn.send(("err", ValueError("text must not be empty")))
-        elif name == "synthesize":
+            continue
+        if text == "hang":  # a worker that never finishes (e.g. the machine is paging)
+            time.sleep(60)
+        if name == "synthesize":
             conn.send(("ok", f"MP3:{text}".encode()))
         else:
             conn.send(("ok", (b"MP3", 1.5)))
+
+
+def never_ready_worker(conn, voice_clone_path=None):
+    time.sleep(60)  # stuck loading the model
 
 
 @pytest.fixture
 def worker_mode(monkeypatch):
     from adjutantvoice.config import settings
 
+    # Patched (not just read) so tests may change them directly and still get them restored.
     monkeypatch.setattr(settings, "idle_unload_seconds", 60)
+    monkeypatch.setattr(settings, "worker_timeout_seconds", 60)
+    monkeypatch.setattr(settings, "min_available_memory_gb", 0)
     monkeypatch.setattr(engine, "_worker_main", lambda: fake_worker)
     return settings
 
@@ -105,3 +115,41 @@ def test_unload_stops_worker(worker_mode):
 
     assert not proc.is_alive()
     assert engine.is_loaded() is False
+
+
+def test_stuck_request_times_out_and_worker_is_replaced(worker_mode):
+    engine.load()
+    engine.synthesize("warm up")  # start the worker under the normal budget
+    stuck = engine._proc
+    worker_mode.worker_timeout_seconds = 2
+
+    with pytest.raises(RuntimeError, match="longer than 2s"):
+        engine.synthesize("hang")
+
+    assert not stuck.is_alive()
+    worker_mode.worker_timeout_seconds = 60
+    assert engine.synthesize("next") == b"MP3:next"  # a fresh worker
+
+
+def test_worker_that_never_finishes_loading_times_out(worker_mode, monkeypatch):
+    worker_mode.worker_timeout_seconds = 2
+    monkeypatch.setattr(engine, "_worker_main", lambda: never_ready_worker)
+    engine.load()
+
+    with pytest.raises(RuntimeError, match="didn't finish loading"):
+        engine.synthesize("hello")
+
+    assert engine._proc is None
+
+
+def test_worker_not_started_when_memory_is_low(worker_mode, monkeypatch):
+    worker_mode.min_available_memory_gb = 4
+    monkeypatch.setattr(engine, "_available_memory_gb", lambda: 1.5)
+    engine.load()
+
+    with pytest.raises(RuntimeError, match="only 1.5 GB of memory is available"):
+        engine.synthesize("hello")
+
+    assert engine._proc is None
+    monkeypatch.setattr(engine, "_available_memory_gb", lambda: 8.0)
+    assert engine.synthesize("hello") == b"MP3:hello"

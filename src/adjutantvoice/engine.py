@@ -64,8 +64,34 @@ def _worker_main():
     return worker.main
 
 
-def _spawn() -> None:
+def _available_memory_gb() -> Optional[float]:
+    """Physical memory available to new processes, or None if it can't be measured."""
+    try:
+        import psutil
+    except ImportError:
+        return None
+    return psutil.virtual_memory().available / 2**30
+
+
+def _recv(conn, deadline: Optional[float]):
+    """``conn.recv()`` that raises TimeoutError at *deadline* (``time.monotonic()``; None = no limit)."""
+    if deadline is not None and not conn.poll(max(0.0, deadline - time.monotonic())):
+        raise TimeoutError
+    return conn.recv()
+
+
+def _spawn(deadline: Optional[float] = None) -> None:
     global _proc, _conn, _using_clone
+
+    # A worker started without enough memory makes the whole machine page to
+    # disk and may never finish, so refuse up front with a clear message.
+    needed = settings.min_available_memory_gb
+    available = _available_memory_gb() if needed > 0 else None
+    if available is not None and available < needed:
+        raise RuntimeError(
+            f"Not starting the TTS model: only {available:.1f} GB of memory is available "
+            f"(AV_MIN_AVAILABLE_MEMORY_GB={needed:g}). Close some applications and try again."
+        )
 
     logger.info("Starting TTS worker process …")
     ctx = multiprocessing.get_context("spawn")
@@ -79,10 +105,18 @@ def _spawn() -> None:
     proc.start()
     child_conn.close()  # so recv() sees EOF if the worker dies
     try:
-        status, result = parent_conn.recv()
+        status, result = _recv(parent_conn, deadline)
     except EOFError:
         proc.join(5)
         raise RuntimeError(f"TTS worker exited during startup (exit code {proc.exitcode})") from None
+    except TimeoutError:
+        proc.kill()
+        proc.join(5)
+        parent_conn.close()
+        raise RuntimeError(
+            f"TTS worker didn't finish loading the model within {settings.worker_timeout_seconds}s "
+            "(AV_WORKER_TIMEOUT_SECONDS); it was stopped. The machine may be low on memory."
+        ) from None
     if status == "err":
         proc.join(5)
         raise result
@@ -102,6 +136,17 @@ def _stop() -> None:
         if _proc.is_alive():
             _proc.terminate()
             _proc.join(5)
+    _proc = _conn = None
+
+
+def _kill() -> None:
+    """Stop a worker that isn't responding (``_stop`` would wait for it)."""
+    global _proc, _conn
+    if _conn is not None:
+        _conn.close()
+    if _proc is not None:
+        _proc.kill()
+        _proc.join(5)
     _proc = _conn = None
 
 
@@ -126,14 +171,24 @@ def _idle_stop() -> None:
 
 
 def _call(name: str, *args):
+    timeout = settings.worker_timeout_seconds
+    # One budget for the whole request, including a worker (re)start, so a
+    # stuck worker fails well before MCP clients give up on the call.
+    deadline = time.monotonic() + timeout if timeout > 0 else None
     with _lock:
         if not _started:
             raise RuntimeError("TTS model is not loaded. Call engine.load() first.")
         if _conn is None:
-            _spawn()
+            _spawn(deadline)
         try:
             _conn.send((name, args))
-            status, result = _conn.recv()
+            status, result = _recv(_conn, deadline)
+        except TimeoutError:
+            _kill()
+            raise RuntimeError(
+                f"TTS request took longer than {timeout}s (AV_WORKER_TIMEOUT_SECONDS); the worker "
+                "was stopped and will restart on the next request. The machine may be low on memory."
+            ) from None
         except (EOFError, OSError):
             _stop()
             raise RuntimeError("TTS worker process died; it will be restarted on the next request.") from None

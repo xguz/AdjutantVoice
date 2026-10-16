@@ -20,6 +20,7 @@ dependencies = [
     "fastmcp",
     "ruamel.yaml",
     "omnivoice",
+    "psutil",        # engine: available-memory check before starting the worker
 ]
 
 [project.optional-dependencies]

@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     dtype: str = "float16"              # "float16" | "bfloat16" | "float32"
     num_step: int = 32                  # OmniVoice decoding steps; lower = faster, rougher
     idle_unload_seconds: int = 0        # free model weights after this long unused; 0 = never
+    # Worker mode only (idle_unload_seconds > 0):
+    worker_timeout_seconds: int = 240   # max time per request, incl. worker start; 0 = no limit
+    min_available_memory_gb: float = 0  # don't start the worker with less RAM available; 0 = no check
 
     # Voice
     #
